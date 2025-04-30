@@ -1,0 +1,16 @@
+# Arquivos específicos para ignorar
+reload.sh
+
+# Arquivos gerados pelo sistema
+.DS_Store
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambientes virtuais
+venv/
+env/
+.env/
+
+# Logs
+*.log 
