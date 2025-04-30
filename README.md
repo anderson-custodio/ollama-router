@@ -1,21 +1,21 @@
 # LLM Router
 
-Este projeto fornece uma API compatível com OpenAI para roteamento de solicitações para modelos Ollama locais.
+This project provides an OpenAI-compatible API for routing requests to local Ollama models.
 
-## Pré-requisitos
+## Prerequisites
 
 - Python 3.8+
-- [Ollama](https://ollama.ai/) instalado e rodando
+- [Ollama](https://ollama.ai/) installed and running
 
-## Instalação de Dependências
+## Installing Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Configurando Modelos Ollama
+## Setting Up Ollama Models
 
-Certifique-se de ter os modelos mencionados no arquivo `ollama_router_openai_compatible_server.py` instalados no Ollama:
+Make sure you have the models mentioned in the `ollama_router_openai_compatible_server.py` file installed in Ollama:
 
 ```bash
 ollama pull llama3.1:8b-instruct-q8_0
@@ -24,39 +24,39 @@ ollama pull gemma3:4b-it-q4_K_M
 ollama pull deepseek-r1:8b
 ```
 
-## Iniciando o Servidor
+## Starting the Server
 
 ```bash
-# Na pasta raiz do projeto
+# In the project's root folder
 python ollama_router_openai_compatible_server.py
 ```
 
-Isso iniciará o servidor na porta 8005.
+This will start the server on port 8005.
 
-## Utilizando com Open WebUI
+## Using with Open WebUI
 
-O Open WebUI é uma interface web que você pode usar para interagir com o LLM Router. 
-Para executá-lo usando Docker:
+Open WebUI is a web interface that you can use to interact with the LLM Router.
+To run it using Docker:
 
 ```bash
 docker run -d -p 3000:8080 \
   -v open-webui:/app/backend/data \
   -e OPENAI_API_BASE_URLS="http://host.docker.internal:8005/v1;" \
-  -e OPENAI_API_KEYS="dummy-key;" \
+  -e OPENAI_API_KEYS="keep-anything-here;" \
   -e WEBUI_AUTH=False \
   --restart always \
   --name open-webui \
   ghcr.io/open-webui/open-webui:main
 ```
 
-Após iniciar o contêiner, acesse a interface web em:
+After starting the container, access the web interface at:
 ```
 http://localhost:3000
 ```
 
-## Funcionalidades Implementadas
+## Implemented Features
 
-- Roteamento dinâmico de solicitações para diferentes modelos Ollama baseado no tipo de pergunta
-- Compatibilidade com a API de completions do OpenAI
-- Suporte a streaming de resposta para uma experiência interativa
-- Classificação automática do tipo de prompt (code, math, talk, reasoning, other)
+- Dynamic routing of requests to different Ollama models based on question type
+- Compatibility with OpenAI's completions API
+- Support for response streaming for an interactive experience
+- Automatic classification of prompt type (code, math, talk, reasoning, other)

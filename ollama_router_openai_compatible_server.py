@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 import json
 import argparse
 
-# Configuração de logging
+# Logging configuration
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -19,24 +19,24 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Adicionar middleware CORS
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite todas as origens
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["*"],  # Permite todos os métodos
-    allow_headers=["*"],  # Permite todos os headers
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 ROUTER_MODEL = "llama3.1:8b-instruct-q8_0"
 TRANSLATION_MODEL = "mistral-small:22b-instruct-2409-q4_K_M"
 
-# Configuração para tradução automática
-ENABLE_TRANSLATION = True  # Valor padrão, pode ser alterado via linha de comando
+# Automatic translation configuration
+ENABLE_TRANSLATION = True  # Default value, can be changed via command line
 
 
-# Redirecionar endpoint raiz para /v1/chat/completions
+# Redirect root endpoint to /v1/chat/completions
 @app.post("/")
 async def root(request: Request):
     body = await request.json()
@@ -78,7 +78,7 @@ class ChatCompletionResponse(BaseModel):
     usage: Usage
 
 
-# Mapeamento de tipos de tarefas para modelos específicos
+# Task type mapping to specific models
 MODEL_MAP = {
     "code": "qwen2.5-coder:14b-base-q4_0",
     "math": "gemma3:4b-it-q4_K_M",
@@ -90,10 +90,10 @@ MODEL_MAP = {
 
 def detect_language(prompt: str) -> str:
     """
-    Detecta o idioma usado no prompt do usuário.
-    Retorna o código do idioma (e.g., 'en', 'pt-br', 'es', etc.)
+    Detects the language used in the user's prompt.
+    Returns the language code (e.g., 'en', 'pt-br', 'es', etc.)
     """
-    # Limitar o tamanho do prompt para economia de tokens
+    # Limit the prompt size to save tokens
     sample_text = prompt[:500] if len(prompt) > 500 else prompt
 
     lang_prompt = f"""
@@ -112,19 +112,43 @@ def detect_language(prompt: str) -> str:
     )
 
     detected_lang = response.json().get("response", "en").strip().lower()
-    logger.info(f"Idioma detectado: '{detected_lang}'")
+    logger.info(f"Language detected: '{detected_lang}'")
 
     return detected_lang
 
 
+def should_translate(user_language: str, content: str) -> bool:
+    """
+    Checks if the response content needs to be translated.
+    Compares the language of the user's prompt with the language of the response.
+    Returns True if translation is needed, False otherwise.
+    """
+    if not ENABLE_TRANSLATION or not user_language or user_language == "en":
+        return False
+        
+    # Limit the content size to save tokens
+    sample_text = content[:500] if len(content) > 500 else content
+    
+    # Detect the language of the response
+    response_language = detect_language(sample_text)
+    logger.info(f"Response language: '{response_language}'")
+    
+    # If the response language is the same as the user's, we don't need to translate
+    if response_language == user_language:
+        logger.info(f"Response is already in the user's language ({user_language}), skipping translation")
+        return False
+        
+    return True
+
+
 def translate_text(text: str, target_language: str) -> str:
     """
-    Traduz o texto para o idioma especificado usando o modelo router.
+    Translates the text to the specified language using the router model.
     """
     if not text or target_language == "en":
         return text
 
-    # Mapear códigos de idioma para nomes completos para melhorar a instrução
+    # Map language codes to full names to improve instruction
     language_names = {
         "pt": "Portuguese",
         "pt-br": "Brazilian Portuguese",
@@ -138,7 +162,7 @@ def translate_text(text: str, target_language: str) -> str:
         "ru": "Russian",
     }
 
-    # Obter o nome completo do idioma, ou usar o código se não estiver mapeado
+    # Get the full name of the language, or use the code if not mapped
     language_name = language_names.get(target_language, target_language)
 
     translate_prompt = f"""
@@ -161,27 +185,27 @@ def translate_text(text: str, target_language: str) -> str:
     Translation (in {language_name}):
     """
 
-    # Usar temperatura mais baixa para tradução mais consistente
+    # Use lower temperature for more consistent translation
     response = requests.post(
         OLLAMA_ENDPOINT,
         json={
             "model": TRANSLATION_MODEL,
             "prompt": translate_prompt,
             "stream": False,
-            "temperature": 0.1,  # Temperatura mais baixa para maior consistência
+            "temperature": 0.1,  # Lower temperature for greater consistency
         },
     )
 
     translated_text = response.json().get("response", text).strip()
-    logger.info(f"Texto traduzido para '{target_language}'")
+    logger.info(f"Text translated to '{target_language}'")
 
     return translated_text
 
 
 def classify_prompt(prompt: str) -> str:
     """
-    Classifica o prompt do usuário em uma categoria para escolher o modelo mais adequado.
-    Categorias: code, math, talk, reasoning, other
+    Classifies the user's prompt into a category to choose the most suitable model.
+    Categories: code, math, talk, reasoning, other
     """
     router_prompt = f"""
     You are a precise classifier that determines the most suitable category for a prompt.
@@ -210,23 +234,23 @@ def classify_prompt(prompt: str) -> str:
         json={"model": ROUTER_MODEL, "prompt": router_prompt, "stream": False},
     )
     classification = response.json().get("response", "other").strip().lower()
-    logger.info(f"Prompt classificado: '{prompt[:100]}...' (truncado)")
-    logger.info(f"Classificação recebida: '{classification}'")
+    logger.info(f"Prompt classified: '{prompt[:100]}...' (truncated)")
+    logger.info(f"Classification received: '{classification}'")
     return classification
 
 
 def select_model(task_type: str) -> str:
     """
-    Seleciona o modelo mais adequado com base no tipo de tarefa classificada.
-    Retorna o nome do modelo Ollama a ser usado.
+    Selects the most appropriate model based on the classified task type.
+    Returns the name of the Ollama model to use.
     """
     return MODEL_MAP.get(task_type, "llama3.1:8b-instruct-q8_0")
 
 
 def extract_prompt_from_messages(messages: List[Message]) -> str:
     """
-    Extrai o prompt do usuário da lista de mensagens.
-    Retorna o conteúdo da última mensagem do usuário.
+    Extracts the user's prompt from the message list.
+    Returns the content of the last user message.
     """
     # Very simple extraction - get the last user message
     for message in reversed(messages):
@@ -240,11 +264,11 @@ async def chat_completions(request: ChatCompletionRequest):
     # Extract the prompt from the messages
     user_prompt = extract_prompt_from_messages(request.messages)
 
-    # Detectar idioma de forma síncrona
+    # Detect language synchronously
     user_language = ""
     if ENABLE_TRANSLATION:
         user_language = detect_language(user_prompt)
-        logger.info(f"Idioma detectado para tradução: '{user_language}'")
+        logger.info(f"Language detected for translation: '{user_language}'")
 
     # Classify the task type
     task_type = classify_prompt(user_prompt)
@@ -274,17 +298,18 @@ async def chat_completions(request: ChatCompletionRequest):
     )
 
     response_text = gen_response.json().get("response", "")
-    logger.info(f"Resposta original recebida, tamanho: {len(response_text)}")
+    logger.info(f"Original response received, size: {len(response_text)}")
 
     # Translate the response if needed
     original_response = response_text
-    if ENABLE_TRANSLATION and user_language and user_language != "en":
-        logger.info(f"Iniciando tradução para '{user_language}'")
+    # Check if translation is necessary (if the language of the response is different from the user's)
+    if should_translate(user_language, response_text):
+        logger.info(f"Starting translation to '{user_language}'")
         response_text = translate_text(response_text, user_language)
-        logger.info(f"Tradução concluída, tamanho: {len(response_text)}")
-        # Verificação de segurança - se a tradução falhar, use a resposta original
+        logger.info(f"Translation completed, size: {len(response_text)}")
+        # Safety check - if translation fails, use the original response
         if not response_text or len(response_text) < 10:
-            logger.warning("Tradução parece ter falhado, usando resposta original")
+            logger.warning("Translation seems to have failed, using original response")
             response_text = original_response
 
     # Estimate token counts (very rough estimate)
@@ -312,7 +337,7 @@ async def chat_completions(request: ChatCompletionRequest):
         },
     }
 
-    logger.info(f"Enviando resposta final, tamanho: {len(response_text)}")
+    logger.info(f"Sending final response, size: {len(response_text)}")
     return result
 
 
@@ -321,24 +346,28 @@ async def stream_response(
 ):
     """
     Stream the response from Ollama in the OpenAI streaming format.
-    Coleta a resposta completa, traduz se necessário, e então envia como streaming.
+    Streams the original response in real-time followed by the translated response, both via streaming.
     """
     response_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
     
-    # Determinar se precisamos traduzir
+    # Determine if we need translation - this will be confirmed after receiving the response
     need_translation = (
         ENABLE_TRANSLATION and target_language and target_language != "en"
     )
     if need_translation:
-        logger.info(f"Streaming com tradução ativada para idioma '{target_language}'")
+        logger.info(f"Streaming with translation potentially enabled for language '{target_language}'")
     else:
-        logger.info(f"Streaming sem tradução (idioma: '{target_language}')")
+        logger.info(f"Streaming without translation (language: '{target_language}')")
     
-    # Coletar toda a resposta primeiro
+    # We'll collect the complete response for later translation
     collected_content = ""
     
-    # Make request to Ollama and collect full response
+    # Phase 1: Send the original response in streaming directly from Ollama
+    # while collecting the complete content for translation
+    logger.info(f"Starting direct streaming of original response")
+    
+    # Make the request to Ollama with streaming
     with requests.post(
         OLLAMA_ENDPOINT,
         json={"model": ollama_model, "prompt": prompt, "stream": True},
@@ -350,49 +379,71 @@ async def stream_response(
                     chunk = json.loads(line.decode("utf-8"))
                     content = chunk.get("response", "")
                     if content:
+                        # Collect for translation later
                         collected_content += content
+                        
+                        # Send chunk immediately to client
+                        data = {
+                            "id": response_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": client_model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"content": content},
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                        yield f"data: {json.dumps(data)}\n\n"
+                        
                 except Exception as e:
                     logger.error(f"Error processing streaming response: {e}")
     
-    logger.info(f"Resposta completa coletada: {len(collected_content)} caracteres")
+    logger.info(f"Original response completed: {len(collected_content)} characters")
     
-    # Traduzir a resposta completa se necessário
-    content_to_stream = collected_content
-    if need_translation and collected_content:
-        logger.info(f"Iniciando tradução do conteúdo completo para '{target_language}'")
-        content_to_stream = translate_text(collected_content, target_language)
-        logger.info(f"Tradução concluída: {len(content_to_stream)} caracteres")
+    # Phase 2: Check if the response needs to be translated
+    perform_translation = collected_content and need_translation and should_translate(target_language, collected_content)
+    
+    # Translate and send the translated response in streaming if necessary
+    if perform_translation:
+        # Add a clear line break between responses
+        separator = "\n\n---\n\n"
+        yield f"data: {json.dumps({'id': response_id, 'object': 'chat.completion.chunk', 'created': created, 'model': client_model, 'choices': [{'index': 0, 'delta': {'content': separator}, 'finish_reason': None}]})}\n\n"
         
-        # Verificação de segurança - se a tradução falhar, use o conteúdo original
-        if not content_to_stream or len(content_to_stream) < 10:
-            logger.warning("Tradução falhou, usando conteúdo original")
-            content_to_stream = collected_content
-    
-    # Agora que temos o conteúdo completo (traduzido ou não), vamos enviá-lo como streaming
-    # Dividir em chunks menores para simular streaming real
-    chunk_size = 10  # Tamanho de cada chunk para streaming
-    content_chunks = [content_to_stream[i:i+chunk_size] for i in range(0, len(content_to_stream), chunk_size)]
-    
-    logger.info(f"Iniciando envio de {len(content_chunks)} chunks")
-    
-    # Enviar cada chunk como um evento de streaming
-    for chunk in content_chunks:
-        data = {
-            "id": response_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": client_model,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": chunk},
-                    "finish_reason": None,
+        logger.info(f"Starting translation of complete content to '{target_language}'")
+        translated_content = translate_text(collected_content, target_language)
+        logger.info(f"Translation completed: {len(translated_content)} characters")
+        
+        # Safety check - if translation fails, skip this step
+        if translated_content and len(translated_content) >= 10:
+            # Send the translated content in chunks to simulate streaming
+            chunk_size = 10  # Size of each chunk for streaming
+            translated_chunks = [translated_content[i:i+chunk_size] for i in range(0, len(translated_content), chunk_size)]
+            logger.info(f"Starting to send translated response ({len(translated_chunks)} chunks)")
+            
+            for chunk in translated_chunks:
+                data = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": client_model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": chunk},
+                            "finish_reason": None,
+                        }
+                    ],
                 }
-            ],
-        }
-        yield f"data: {json.dumps(data)}\n\n"
+                yield f"data: {json.dumps(data)}\n\n"
+        else:
+            logger.warning("Translation failed, sending only original content")
+    else:
+        logger.info("Translation not necessary, response is already in the user's language")
     
-    # Sinalizar o final do streaming
+    # Signal the end of streaming
     data = {
         "id": response_id,
         "object": "chat.completion.chunk",
@@ -404,7 +455,7 @@ async def stream_response(
     }
     yield f"data: {json.dumps(data)}\n\n"
     yield "data: [DONE]\n\n"
-    logger.info("Streaming concluído")
+    logger.info("Streaming completed")
 
 
 # Add the original endpoint for backward compatibility
@@ -415,7 +466,7 @@ async def original_chat_completions(
     return await chat_completions(request)
 
 
-# Endpoint para /v1/completions (usado por alguns clientes OpenAI)
+# Endpoint for /v1/completions (used by some OpenAI clients)
 class CompletionRequest(BaseModel):
     model: str
     prompt: str
@@ -426,7 +477,7 @@ class CompletionRequest(BaseModel):
 
 @app.post("/v1/completions")
 async def completions(request: CompletionRequest):
-    # Converter request de completions para chat completions
+    # Convert completions request to chat completions
     chat_request = ChatCompletionRequest(
         model=request.model,
         messages=[Message(role="user", content=request.prompt)],
@@ -435,14 +486,14 @@ async def completions(request: CompletionRequest):
         stream=request.stream,
     )
 
-    # Se for streaming, retornar diretamente a resposta de streaming
+    # If streaming, return directly the streaming response
     if request.stream:
         return await chat_completions(chat_request)
 
-    # Para não-streaming, continuar com a implementação original
+    # For non-streaming, continue with the original implementation
     response = await chat_completions(chat_request)
 
-    # Converter resposta para o formato de completions (não chat)
+    # Convert response to completions format (not chat)
     return {
         "id": response["id"],
         "object": "text_completion",
@@ -469,37 +520,38 @@ class PromptRequest(BaseModel):
 async def chat_route(payload: PromptRequest):
     user_prompt = payload.prompt
 
-    # Detectar idioma de forma síncrona
+    # Detect language synchronously
     user_language = ""
     if ENABLE_TRANSLATION:
         user_language = detect_language(user_prompt)
-        logger.info(f"Idioma detectado para /chat: '{user_language}'")
+        logger.info(f"Language detected for /chat: '{user_language}'")
 
-    # Etapa 1: classificar
+    # Step 1: classify
     task_type = classify_prompt(user_prompt)
     selected_model = select_model(task_type)
     logger.info(f"Task type: {task_type}")
     logger.info(f"Selected model: {selected_model}")
 
-    # Etapa 2: gerar com o modelo adequado
+    # Step 2: generate with the appropriate model
     gen_response = requests.post(
         OLLAMA_ENDPOINT,
         json={"model": selected_model, "prompt": user_prompt, "stream": False},
     )
 
     response_text = gen_response.json().get("response", "")
-    logger.info(f"Resposta recebida em /chat, tamanho: {len(response_text)}")
+    logger.info(f"Response received in /chat, size: {len(response_text)}")
 
-    # Traduzir a resposta se necessário
+    # Translate the response if necessary
     original_response = response_text
-    if ENABLE_TRANSLATION and user_language and user_language != "en":
-        logger.info(f"Iniciando tradução em /chat para '{user_language}'")
+    # Check if translation is necessary (if the language of the response is different from the user's)
+    if should_translate(user_language, response_text):
+        logger.info(f"Starting translation in /chat to '{user_language}'")
         response_text = translate_text(response_text, user_language)
-        logger.info(f"Tradução em /chat concluída, tamanho: {len(response_text)}")
+        logger.info(f"Translation in /chat completed, size: {len(response_text)}")
 
-        # Verificação de segurança - se a tradução falhar, use a resposta original
+        # Safety check - if translation fails, use the original response
         if not response_text or len(response_text) < 10:
-            logger.warning("Tradução em /chat falhou, usando resposta original")
+            logger.warning("Translation in /chat failed, using original response")
             response_text = original_response
 
     result = {
@@ -510,7 +562,7 @@ async def chat_route(payload: PromptRequest):
         "translated_to": user_language if user_language != "en" else None,
     }
 
-    logger.info(f"Enviando resposta final de /chat, tamanho: {len(response_text)}")
+    logger.info(f"Sending final response from /chat, size: {len(response_text)}")
     return result
 
 
@@ -523,7 +575,7 @@ async def health_check():
 # Models list endpoint
 @app.get("/v1/models")
 async def list_models():
-    # Lista fixa de modelos compatíveis com OpenAI para exibição ao cliente
+    # Fixed list of OpenAI-compatible models for client display
     available_models = ["dynamic"]
     return {
         "object": "list",
@@ -539,7 +591,7 @@ async def list_models():
     }
 
 
-# Configuração da linha de comando
+# Command line configuration
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Ollama Router compatible with OpenAI API"
@@ -564,14 +616,14 @@ def parse_args():
     return parser.parse_args()
 
 
-# Rodar localmente
+# Run locally
 if __name__ == "__main__":
     args = parse_args()
 
-    # Configurar a tradução com base nos argumentos
+    # Configure translation based on arguments
     ENABLE_TRANSLATION = not args.disable_translation
 
     logger.info(
-        f"Servidor iniciando com tradução automática {'HABILITADA' if ENABLE_TRANSLATION else 'DESABILITADA'}"
+        f"Server starting with automatic translation {'ENABLED' if ENABLE_TRANSLATION else 'DISABLED'}"
     )
     uvicorn.run(app, host=args.host, port=args.port)
