@@ -22,6 +22,7 @@ ollama pull llama3.1:8b-instruct-q8_0
 ollama pull qwen2.5-coder:14b-base-q4_0
 ollama pull gemma3:4b-it-q4_K_M
 ollama pull deepseek-r1:8b
+ollama pull mistral-small:22b-instruct-2409-q4_K_M
 ```
 
 ## Starting the Server
